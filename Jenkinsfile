@@ -125,12 +125,12 @@ stages {
 
                     cd manifest-repo
 
-                    sed -i "s|image: .*|image: ${IMAGE_NAME}:${IMAGE_TAG}|g" deployment.yaml
-
+                    sed -i "s|image: .*|image: ${IMAGE_NAME}:${IMAGE_TAG}|g" my-app-manifests/deployment.yaml
+                    
                     git config user.email "jenkins@ci.local"
                     git config user.name "Jenkins CI"
 
-                    git add deployment.yaml
+                    git add my-app-manifests/deployment.yaml
                     git commit -m "ci: update image to ${IMAGE_TAG} [build ${BUILD_NUMBER}]"
 
                     git push origin main

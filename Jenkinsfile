@@ -15,7 +15,7 @@ environment {
     SONAR_PROJECT_KEY  = 'my-application'
 
     // GitOps manifest repo
-    MANIFEST_REPO      =  'MANIFEST_REPO' = 'https://github.com/Chigich/my-app-manifests.git'
+    MANIFEST_REPO      =  'MANIFEST_REPO' = 'https://github.com/Chigich/GitOps-manifests.git'
     MANIFEST_REPO_CRED = 'git-credentials'
 }
 
@@ -121,7 +121,7 @@ stages {
             ]) {
 
                 sh '''
-                    git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/Chigich/my-app-manifests.git manifest-repo
+                    git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/Chigich/GitOps-manifests.git manifest-repo
 
                     cd manifest-repo
 

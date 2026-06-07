@@ -3,19 +3,17 @@ agent any
 
 ```
 environment {
-    // AWS settings
     AWS_REGION         = 'us-east-1'
     AWS_ACCOUNT_ID     = credentials('aws-account-id')
+
     ECR_REPO_NAME      = 'my-application'
     ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
     IMAGE_NAME         = "${ECR_REGISTRY}/${ECR_REPO_NAME}"
     IMAGE_TAG          = "${BUILD_NUMBER}"
 
-    // SonarQube settings
     SONAR_PROJECT_KEY  = 'my-application'
 
-    // GitOps manifest repo
-    MANIFEST_REPO      =  'MANIFEST_REPO' = 'https://github.com/Chigich/GitOps-manifests.git'
+    MANIFEST_REPO      = 'https://github.com/Chigich/GitOps-manifests.git'
     MANIFEST_REPO_CRED = 'git-credentials'
 }
 
@@ -30,27 +28,31 @@ stages {
 
     stage('Checkout') {
         steps {
-            echo "=== Stage 1: Checking out source code ==="
+            echo "=== Stage 1: Checkout ==="
+
             checkout scm
-            sh 'git log --oneline -5'
-            sh 'ls -la'
+
+            sh '''
+                pwd
+                ls -la
+                git log --oneline -5
+            '''
         }
     }
 
     stage('SonarQube Analysis') {
         steps {
-            echo "=== Stage 2: Running SonarQube analysis ==="
+            echo "=== Stage 2: SonarQube Analysis ==="
 
             sh '''
-                pip install -r requirements.txt
-
+                pip3 install -r requirements.txt
             '''
 
             withSonarQubeEnv('SonarQube') {
                 sh '''
                     sonar-scanner \
                       -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                      -Dsonar.sources=argocd \
+                      -Dsonar.sources=argocd
                 '''
             }
 
@@ -62,23 +64,24 @@ stages {
 
     stage('Build Docker Image') {
         steps {
-            echo "=== Stage 3: Building Docker image ==="
+            echo "=== Stage 3: Build Docker Image ==="
 
             sh '''
                 docker build \
-                  --build-arg APP_VERSION=${BUILD_NUMBER} \
                   -t ${IMAGE_NAME}:${IMAGE_TAG} \
                   -t ${IMAGE_NAME}:latest \
                   .
             '''
 
-            sh "docker images | grep ${ECR_REPO_NAME}"
+            sh '''
+                docker images | grep ${ECR_REPO_NAME}
+            '''
         }
     }
 
     stage('Push to ECR') {
         steps {
-            echo "=== Stage 4: Pushing image to AWS ECR ==="
+            echo "=== Stage 4: Push to ECR ==="
 
             withCredentials([
                 string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
@@ -90,7 +93,7 @@ stages {
                     export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 
                     aws ecr get-login-password --region ${AWS_REGION} | \
-                      docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker login --username AWS --password-stdin ${ECR_REGISTRY}
 
                     aws ecr describe-repositories \
                       --repository-names ${ECR_REPO_NAME} \
@@ -102,40 +105,41 @@ stages {
                     docker push ${IMAGE_NAME}:${IMAGE_TAG}
                     docker push ${IMAGE_NAME}:latest
 
-                    echo "Image pushed: ${IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "Pushed image: ${IMAGE_NAME}:${IMAGE_TAG}"
                 '''
             }
         }
     }
 
-    stage('Update K8s Manifest') {
+    stage('Update GitOps Manifest') {
         steps {
-            echo "=== Stage 5: Updating Kubernetes manifest in GitOps repo ==="
+            echo "=== Stage 5: Update GitOps Repository ==="
 
             withCredentials([
                 usernamePassword(
-                    credentialsId: env.MANIFEST_REPO_CRED,
+                    credentialsId: 'git-credentials',
                     usernameVariable: 'GIT_USER',
                     passwordVariable: 'GIT_TOKEN'
                 )
             ]) {
 
                 sh '''
+                    rm -rf manifest-repo
+
                     git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/Chigich/GitOps-manifests.git manifest-repo
 
                     cd manifest-repo
 
                     sed -i "s|image: .*|image: ${IMAGE_NAME}:${IMAGE_TAG}|g" my-app-manifests/deployment.yaml
-                    
-                    git config user.email "jenkins@ci.local"
-                    git config user.name "Jenkins CI"
+
+                    git config user.email "jenkins@local"
+                    git config user.name "Jenkins"
 
                     git add my-app-manifests/deployment.yaml
-                    git commit -m "ci: update image to ${IMAGE_TAG} [build ${BUILD_NUMBER}]"
+
+                    git commit -m "Update image to ${IMAGE_TAG}" || true
 
                     git push origin main
-
-                    echo "Manifest updated. ArgoCD will sync automatically."
                 '''
             }
         }
@@ -144,17 +148,20 @@ stages {
 
 post {
     always {
+        sh 'docker image prune -f || true'
+
         sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true"
         sh "docker rmi ${IMAGE_NAME}:latest || true"
+
         cleanWs()
     }
 
     success {
-        echo "Pipeline succeeded! Image ${IMAGE_NAME}:${IMAGE_TAG} deployed via ArgoCD."
+        echo "Pipeline completed successfully."
     }
 
     failure {
-        echo "Pipeline failed at stage: ${env.STAGE_NAME}"
+        echo "Pipeline failed."
     }
 }
 ```

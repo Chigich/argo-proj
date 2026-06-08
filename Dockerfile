@@ -1,27 +1,34 @@
+# Build stage
 FROM python:3.12-slim AS builder
 
 WORKDIR /app
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+
+RUN pip install --no-cache-dir \
+    --prefix=/install \
+    -r requirements.txt
 
 # Runtime stage
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Copy dependencies from builder
-COPY --from=builder /root/.local /root/.local
+# Copy installed packages
+COPY --from=builder /install /usr/local
 
 # Copy application source
 COPY argocd/ .
 
-# Non-root user for security
-RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+# Create non-root user
+RUN addgroup --system appgroup && \
+    adduser --system --ingroup appgroup appuser && \
+    chown -R appuser:appgroup /app
+
 USER appuser
 
-ENV PATH=/root/.local/bin:$PATH
-ENV PORT=5000
 ENV PYTHONUNBUFFERED=1
+ENV PORT=5000
 
 EXPOSE 5000
 

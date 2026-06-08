@@ -13,7 +13,7 @@ WORKDIR /app
 COPY --from=builder /root/.local /root/.local
 
 # Copy application source
-COPY src/ .
+COPY argocd/ .
 
 # Non-root user for security
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser

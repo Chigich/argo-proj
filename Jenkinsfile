@@ -14,6 +14,9 @@ pipeline {
 
         MANIFEST_REPO      = 'https://github.com/Chigich/GitOps-manifests.git'
         MANIFEST_REPO_CRED = 'git-credentials'
+
+        // Ensure pip-installed tools AND sonar-scanner are on PATH
+        PATH = "/var/jenkins_home/.local/bin:/var/jenkins_home/sonar-scanner/bin:${env.PATH}"
     }
 
     options {
@@ -28,9 +31,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo "=== Stage 1: Checkout ==="
-
                 checkout scm
-
                 sh '''
                     pwd
                     ls -la
@@ -43,12 +44,33 @@ pipeline {
             steps {
                 echo "=== Stage 2: SonarQube Analysis ==="
 
-                // FIX 1: Added --break-system-packages to allow pip3 install
-                // on Debian/Ubuntu systems with externally-managed Python environments
+                // Install Python dependencies
                 sh '''
                     pip3 install -r requirements.txt --break-system-packages
                 '''
 
+                // Auto-install sonar-scanner if not already present on the agent
+                sh '''
+                    SONAR_SCANNER_VERSION="6.2.1.4610"
+                    SONAR_SCANNER_HOME="/var/jenkins_home/sonar-scanner"
+
+                    if [ ! -f "${SONAR_SCANNER_HOME}/bin/sonar-scanner" ]; then
+                        echo ">>> sonar-scanner not found. Downloading..."
+                        curl -sSLo /tmp/sonar-scanner.zip \
+                            "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux-x64.zip"
+                        unzip -q /tmp/sonar-scanner.zip -d /tmp/sonar-scanner-extracted
+                        mv /tmp/sonar-scanner-extracted/sonar-scanner-${SONAR_SCANNER_VERSION}-linux-x64 ${SONAR_SCANNER_HOME}
+                        rm -f /tmp/sonar-scanner.zip
+                        echo ">>> sonar-scanner installed successfully."
+                    else
+                        echo ">>> sonar-scanner already installed. Skipping download."
+                    fi
+
+                    echo ">>> sonar-scanner version:"
+                    sonar-scanner --version
+                '''
+
+                // Run SonarQube scan
                 withSonarQubeEnv('SonarQube') {
                     sh '''
                         sonar-scanner \
@@ -57,6 +79,7 @@ pipeline {
                     '''
                 }
 
+                // Wait for Quality Gate result
                 timeout(time: 5, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true
                 }
@@ -66,14 +89,12 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 echo "=== Stage 3: Build Docker Image ==="
-
                 sh '''
                     docker build \
                       -t ${IMAGE_NAME}:${IMAGE_TAG} \
                       -t ${IMAGE_NAME}:latest \
                       .
                 '''
-
                 sh '''
                     docker images | grep ${ECR_REPO_NAME}
                 '''
@@ -83,7 +104,6 @@ pipeline {
         stage('Push to ECR') {
             steps {
                 echo "=== Stage 4: Push to ECR ==="
-
                 withCredentials([
                     string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
                     string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
@@ -114,7 +134,6 @@ pipeline {
         stage('Update GitOps Manifest') {
             steps {
                 echo "=== Stage 5: Update GitOps Repository ==="
-
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'git-credentials',
@@ -148,20 +167,13 @@ pipeline {
     post {
         always {
             sh 'docker image prune -f || true'
-
-            // FIX 2: Use single quotes to avoid Groovy string interpolation of secrets,
-            // which was triggering security warnings in the original pipeline.
-            // IMAGE_NAME and IMAGE_TAG are referenced via shell $VAR syntax instead.
             sh 'docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true'
             sh 'docker rmi ${IMAGE_NAME}:latest || true'
-
             cleanWs()
         }
-
         success {
             echo "Pipeline completed successfully."
         }
-
         failure {
             echo "Pipeline failed."
         }
